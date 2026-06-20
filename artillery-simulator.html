@@ -1,0 +1,1189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>炮兵瞄准模拟器 // TAC-FIRE</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Saira+Stencil+One&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#080a08; --bg-panel:#0d100d; --bg-map:#0a0d0a;
+  --amber:#ffb000; --amber-dim:#8a6000; --amber-bright:#ffd870;
+  --amber-glow:rgba(255,176,0,.4);
+  --green:#22cc44; --red:#ff3344; --red-glow:rgba(255,51,68,.4);
+  --blue:#4499ff; --blue-glow:rgba(68,153,255,.4);
+  --grid:rgba(255,176,0,.06); --grid-major:rgba(255,176,0,.12);
+  --border:rgba(255,176,0,.18); --border-bright:rgba(255,176,0,.35);
+  --text:#ccb070; --text-dim:#6a5030; --text-bright:#ffd870;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;background:var(--bg);color:var(--amber);
+  font-family:'Share Tech Mono','Courier New',monospace;overflow:hidden;user-select:none}
+body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
+  background:radial-gradient(ellipse at 20% 30%,rgba(255,176,0,.03) 0%,transparent 50%),
+             radial-gradient(ellipse at 80% 70%,rgba(68,153,255,.02) 0%,transparent 50%)}
+body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:1000;mix-blend-mode:multiply;
+  background:repeating-linear-gradient(0deg,rgba(0,0,0,.12) 0,rgba(0,0,0,.12) 1px,transparent 1px,transparent 3px)}
+
+.app{position:relative;z-index:1;display:grid;
+  grid-template-columns:1fr 340px;grid-template-rows:56px 1fr;
+  grid-template-areas:"topbar topbar" "map sidebar";
+  height:100vh;gap:1px;background:var(--border)}
+
+.topbar{grid-area:topbar;background:var(--bg-panel);display:flex;align-items:center;
+  padding:0 20px;gap:24px;border-bottom:1px solid var(--border)}
+.title{font-family:'Saira Stencil One',sans-serif;font-size:22px;color:var(--amber-bright);
+  letter-spacing:.15em;text-shadow:0 0 12px var(--amber-glow);white-space:nowrap}
+.title::before{content:'◢';margin-right:8px;color:var(--green)}
+.weapon-select{display:flex;gap:4px}
+.weapon-btn{background:transparent;border:1px solid var(--border);color:var(--text-dim);
+  padding:6px 14px;font-family:inherit;font-size:12px;letter-spacing:.1em;cursor:pointer;transition:all .15s}
+.weapon-btn:hover{border-color:var(--border-bright);color:var(--text)}
+.weapon-btn.active{background:rgba(255,176,0,.1);border-color:var(--amber);
+  color:var(--amber-bright);box-shadow:0 0 8px var(--amber-glow),inset 0 0 8px rgba(255,176,0,.1)}
+.score-bar{margin-left:auto;display:flex;gap:20px;font-size:13px}
+.score-item{display:flex;flex-direction:column;align-items:flex-end}
+.score-label{font-size:10px;color:var(--text-dim);letter-spacing:.15em}
+.score-value{font-size:16px;color:var(--amber-bright);font-weight:bold}
+
+.map-panel{grid-area:map;position:relative;background:var(--bg-map);overflow:hidden}
+#mapCanvas{display:block;width:100%;height:100%;cursor:crosshair}
+.map-hud{position:absolute;pointer-events:none;font-size:11px;color:var(--text-dim);letter-spacing:.1em;line-height:1.6}
+.map-hud.tl{top:12px;left:12px} .map-hud.tr{top:12px;right:12px;text-align:right}
+.map-hud.bl{bottom:12px;left:12px} .map-hud.br{bottom:12px;right:12px;text-align:right}
+.map-hud .label{color:var(--text-dim)} .map-hud .value{color:var(--amber)}
+.hint{font-size:10px;color:var(--text-dim);margin-top:4px}
+
+.sidebar{grid-area:sidebar;background:var(--bg-panel);display:flex;flex-direction:column;overflow:hidden}
+.section{padding:14px 16px;border-bottom:1px solid var(--border)}
+.section h2{font-size:11px;color:var(--text-dim);letter-spacing:.25em;margin-bottom:10px;
+  text-transform:uppercase;display:flex;align-items:center;gap:8px}
+.section h2::before{content:'';width:6px;height:6px;background:var(--amber);box-shadow:0 0 6px var(--amber-glow)}
+
+#profileCanvas{display:block;width:100%;height:140px;background:var(--bg-map);border:1px solid var(--border)}
+
+.control-group{margin-bottom:12px}
+.control-label{display:flex;justify-content:space-between;align-items:center;font-size:12px;
+  color:var(--text);margin-bottom:4px}
+.control-label .value{color:var(--amber-bright);font-size:14px;font-weight:bold}
+.slider-row{display:flex;align-items:center;gap:8px}
+input[type="range"]{flex:1;-webkit-appearance:none;appearance:none;height:4px;
+  background:var(--bg-map);border:1px solid var(--border);outline:none}
+input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;
+  width:14px;height:14px;background:var(--amber);border:1px solid var(--amber-bright);
+  cursor:pointer;box-shadow:0 0 6px var(--amber-glow)}
+input[type="range"]::-moz-range-thumb{width:14px;height:14px;background:var(--amber);
+  border:1px solid var(--amber-bright);cursor:pointer;box-shadow:0 0 6px var(--amber-glow)}
+input[type="number"]{width:60px;background:var(--bg-map);border:1px solid var(--border);
+  color:var(--amber-bright);font-family:inherit;font-size:13px;padding:3px 6px;text-align:center;outline:none}
+input[type="number"]:focus{border-color:var(--amber)}
+input[type="number"]::-webkit-inner-spin-button{-webkit-appearance:none}
+
+.charge-buttons{display:flex;gap:3px}
+.charge-btn{flex:1;background:transparent;border:1px solid var(--border);color:var(--text-dim);
+  padding:4px 0;font-family:inherit;font-size:12px;cursor:pointer;transition:all .15s}
+.charge-btn:hover{border-color:var(--border-bright);color:var(--text)}
+.charge-btn.active{background:rgba(255,176,0,.12);border-color:var(--amber);color:var(--amber-bright)}
+
+.wind-indicator{display:flex;align-items:center;gap:10px;margin:10px 0;padding:8px;
+  background:var(--bg-map);border:1px solid var(--border)}
+.wind-compass{width:48px;height:48px;position:relative;border:1px solid var(--border);
+  border-radius:50%;flex-shrink:0}
+.wind-compass::before{content:'N';position:absolute;top:-2px;left:50%;transform:translateX(-50%);
+  font-size:8px;color:var(--text-dim)}
+.wind-arrow{position:absolute;top:50%;left:50%;width:2px;height:18px;background:var(--green);
+  transform-origin:50% 100%;transform:translate(-50%,-100%) rotate(0deg);
+  box-shadow:0 0 4px rgba(34,204,68,.6);transition:transform .3s}
+.wind-arrow::before{content:'';position:absolute;top:-4px;left:-3px;width:8px;height:8px;
+  background:var(--green);clip-path:polygon(50% 0,100% 100%,0 100%)}
+.wind-info{font-size:12px;color:var(--text)}
+.wind-info .speed{color:var(--green);font-size:16px;font-weight:bold}
+
+.readouts{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:10px 0}
+.readout{background:var(--bg-map);border:1px solid var(--border);padding:6px 8px;font-size:11px}
+.readout .label{color:var(--text-dim);font-size:10px;letter-spacing:.1em}
+.readout .val{color:var(--amber-bright);font-size:15px;font-weight:bold}
+
+.fire-btn{width:100%;padding:14px;
+  background:linear-gradient(180deg,rgba(255,51,68,.15),rgba(255,51,68,.05));
+  border:1px solid var(--red);color:var(--red);font-family:'Saira Stencil One',sans-serif;
+  font-size:18px;letter-spacing:.3em;cursor:pointer;text-shadow:0 0 10px var(--red-glow);
+  box-shadow:0 0 12px var(--red-glow),inset 0 0 12px rgba(255,51,68,.1);transition:all .15s;margin-bottom:8px}
+.fire-btn:hover:not(:disabled){background:linear-gradient(180deg,rgba(255,51,68,.25),rgba(255,51,68,.1));
+  box-shadow:0 0 20px var(--red-glow),inset 0 0 16px rgba(255,51,68,.2)}
+.fire-btn:active:not(:disabled){transform:scale(.98)}
+.fire-btn:disabled{opacity:.4;cursor:not-allowed}
+.reset-btn{width:100%;padding:8px;background:transparent;border:1px solid var(--border);
+  color:var(--text-dim);font-family:inherit;font-size:12px;letter-spacing:.15em;cursor:pointer;transition:all .15s}
+.reset-btn:hover{border-color:var(--amber);color:var(--amber)}
+
+.log-section{flex:1;overflow:hidden;display:flex;flex-direction:column}
+.log-entries{flex:1;overflow-y:auto;font-size:11px;line-height:1.6}
+.log-entries::-webkit-scrollbar{width:4px}
+.log-entries::-webkit-scrollbar-track{background:var(--bg-map)}
+.log-entries::-webkit-scrollbar-thumb{background:var(--border-bright)}
+.log-entry{padding:4px 0;border-bottom:1px solid rgba(255,176,0,.05);color:var(--text);display:flex;gap:8px}
+.log-entry .time{color:var(--text-dim);flex-shrink:0}
+.log-entry.hit{color:var(--green)}
+.log-entry.miss{color:var(--text-dim)}
+.log-entry.destroyed{color:var(--amber-bright);font-weight:bold}
+
+.toast{position:fixed;top:80px;left:50%;transform:translateX(-50%);background:var(--bg-panel);
+  border:1px solid var(--amber);color:var(--amber-bright);padding:12px 32px;
+  font-family:'Saira Stencil One',sans-serif;font-size:20px;letter-spacing:.2em;
+  z-index:100;opacity:0;pointer-events:none;transition:opacity .3s;box-shadow:0 0 20px var(--amber-glow)}
+.toast.show{opacity:1}
+.toast.hit{border-color:var(--green);color:var(--green);box-shadow:0 0 20px rgba(34,204,68,.4)}
+.toast.miss{border-color:var(--text-dim);color:var(--text)}
+
+.mission-complete{position:fixed;inset:0;background:rgba(8,10,8,.92);display:none;
+  align-items:center;justify-content:center;flex-direction:column;z-index:200}
+.mission-complete.show{display:flex}
+.mission-complete h1{font-family:'Saira Stencil One',sans-serif;font-size:48px;color:var(--amber-bright);
+  letter-spacing:.2em;text-shadow:0 0 20px var(--amber-glow);margin-bottom:20px}
+.mission-complete .stats{font-size:16px;color:var(--text);margin-bottom:30px;text-align:center;line-height:2}
+.mission-complete button{padding:12px 40px;background:transparent;border:1px solid var(--amber);
+  color:var(--amber);font-family:'Saira Stencil One',sans-serif;font-size:16px;letter-spacing:.2em;
+  cursor:pointer;box-shadow:0 0 12px var(--amber-glow)}
+.mission-complete button:hover{background:rgba(255,176,0,.1)}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header class="topbar">
+    <div class="title">TAC-FIRE 炮兵瞄准模拟器</div>
+    <div class="weapon-select" id="weaponSelect"></div>
+    <div class="score-bar">
+      <div class="score-item"><span class="score-label">命中</span><span class="score-value" id="hitsValue">0</span></div>
+      <div class="score-item"><span class="score-label">发射</span><span class="score-value" id="shotsValue">0</span></div>
+      <div class="score-item"><span class="score-label">得分</span><span class="score-value" id="scoreValue">0</span></div>
+      <div class="score-item"><span class="score-label">目标</span><span class="score-value" id="targetsValue">0/0</span></div>
+    </div>
+  </header>
+
+  <main class="map-panel">
+    <canvas id="mapCanvas"></canvas>
+    <div class="map-hud tl">
+      <div><span class="label">坐标</span> <span class="value" id="coordReadout">— —</span></div>
+      <div><span class="label">网格</span> <span class="value" id="gridReadout">—</span></div>
+    </div>
+    <div class="map-hud tr">
+      <div><span class="label">比例</span> <span class="value">1:50000</span></div>
+      <div><span class="label">磁偏角</span> <span class="value">-2°</span></div>
+    </div>
+    <div class="map-hud bl">
+      <div><span class="label">炮位</span> <span class="value" id="batteryReadout">—</span></div>
+      <div class="hint">点击地图设定方位 · 空格开火 · 方向键微调</div>
+    </div>
+    <div class="map-hud br">
+      <div><span class="label">风向</span> <span class="value" id="windReadout">—</span></div>
+    </div>
+  </main>
+
+  <aside class="sidebar">
+    <section class="section">
+      <h2>弹道剖面</h2>
+      <canvas id="profileCanvas"></canvas>
+    </section>
+
+    <section class="section">
+      <h2>射击诸元</h2>
+      <div class="control-group">
+        <div class="control-label"><span>方位角 (mil)</span><span class="value" id="azDisplay">0000</span></div>
+        <div class="slider-row">
+          <input type="range" id="azimuthSlider" min="0" max="6400" value="4500" step="1">
+          <input type="number" id="azimuthInput" min="0" max="6400" value="4500" step="1">
+        </div>
+      </div>
+      <div class="control-group">
+        <div class="control-label"><span>仰角 (°)</span><span class="value" id="elDisplay">45.0</span></div>
+        <div class="slider-row">
+          <input type="range" id="elevationSlider" min="5" max="85" value="45" step="0.1">
+          <input type="number" id="elevationInput" min="5" max="85" value="45" step="0.1">
+        </div>
+      </div>
+      <div class="control-group">
+        <div class="control-label"><span>装药号</span><span class="value" id="chargeDisplay">5</span></div>
+        <div class="charge-buttons" id="chargeButtons"></div>
+      </div>
+      <div class="wind-indicator">
+        <div class="wind-compass"><div class="wind-arrow" id="windArrow"></div></div>
+        <div class="wind-info">
+          <div>风速</div>
+          <div class="speed" id="windSpeedDisplay">0 m/s</div>
+          <div id="windDirDisplay">—</div>
+        </div>
+      </div>
+      <div class="readouts">
+        <div class="readout"><div class="label">射程</div><div class="val" id="rangeDisplay">— m</div></div>
+        <div class="readout"><div class="label">飞行时间</div><div class="val" id="flightTimeDisplay">— s</div></div>
+        <div class="readout"><div class="label">最大弹高</div><div class="val" id="maxAltDisplay">— m</div></div>
+        <div class="readout"><div class="label">散布</div><div class="val" id="dispersionDisplay">— m</div></div>
+      </div>
+      <button class="fire-btn" id="fireBtn">开 火</button>
+      <button class="reset-btn" id="resetBtn">重新部署</button>
+    </section>
+
+    <section class="section log-section">
+      <h2>射击日志</h2>
+      <div class="log-entries" id="logEntries"></div>
+    </section>
+  </aside>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<div class="mission-complete" id="missionComplete">
+  <h1 id="missionTitle">任务完成</h1>
+  <div class="stats" id="missionStats"></div>
+  <button id="newMissionBtn">开始新任务</button>
+</div>
+
+<!-- ===== 内嵌 JSON 数据 ===== -->
+<script type="application/json" id="weapons-data">
+[
+  {
+    "id":"howitzer105","name":"105mm 榴弹炮","shortName":"M101",
+    "muzzleVelocity":472,"minElevation":5,"maxElevation":80,
+    "charges":[1,2,3,4,5,6,7],
+    "chargeMultiplier":[0.45,0.55,0.65,0.75,0.85,0.93,1.0],
+    "projectileMass":15,"diameter":0.105,"dragCoef":0.15,
+    "dispersion":25,"blastRadius":60,"description":"通用牵引榴弹炮"
+  },
+  {
+    "id":"mortar81","name":"81mm 迫击炮","shortName":"M252",
+    "muzzleVelocity":250,"minElevation":45,"maxElevation":85,
+    "charges":[1,2,3,4,5,6,7,8],
+    "chargeMultiplier":[0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0],
+    "projectileMass":4.2,"diameter":0.081,"dragCoef":0.12,
+    "dispersion":18,"blastRadius":40,"description":"近距离高弹道迫击炮"
+  },
+  {
+    "id":"rocket122","name":"122mm 火箭炮","shortName":"BM-21",
+    "muzzleVelocity":670,"minElevation":8,"maxElevation":55,
+    "charges":[1],"chargeMultiplier":[1.0],
+    "projectileMass":45,"diameter":0.122,"dragCoef":0.25,
+    "dispersion":70,"blastRadius":80,"description":"远程火箭炮"
+  }
+]
+</script>
+
+<script type="application/json" id="missions-data">
+[
+  {
+    "name":"阵地攻坚",
+    "artilleryPos":[1800,1800],
+    "targets":[
+      {"id":"T1","name":"敌方碉堡","x":6800,"y":7200,"type":"bunker","size":40,"points":100,"health":2},
+      {"id":"T2","name":"装甲车","x":4500,"y":5800,"type":"vehicle","size":25,"points":150,"health":1},
+      {"id":"T3","name":"步兵阵地","x":7500,"y":3500,"type":"infantry","size":50,"points":80,"health":1},
+      {"id":"T4","name":"指挥所","x":8200,"y":8200,"type":"command","size":35,"points":300,"health":3},
+      {"id":"T5","name":"弹药库","x":3500,"y":7500,"type":"ammo","size":45,"points":200,"health":1}
+    ],
+    "terrain":{
+      "water":[{"x":800,"y":3200,"w":2200,"h":700},{"x":6200,"y":800,"w":1600,"h":1100}],
+      "forest":[{"x":3000,"y":4000,"w":1600,"h":1200},{"x":7000,"y":5800,"w":2000,"h":1400}],
+      "hills":[{"x":5200,"y":6200,"radius":700,"height":120},{"x":2500,"y":6800,"radius":500,"height":80}],
+      "roads":[{"points":[[0,5000],[5000,5000],[10000,5000]]},{"points":[[5000,0],[5000,5000],[5000,10000]]}]
+    }
+  },
+  {
+    "name":"山地突袭",
+    "artilleryPos":[1500,8500],
+    "targets":[
+      {"id":"T1","name":"前沿哨所","x":5000,"y":6500,"type":"bunker","size":35,"points":120,"health":2},
+      {"id":"T2","name":"补给车队","x":7000,"y":5000,"type":"vehicle","size":30,"points":180,"health":1},
+      {"id":"T3","name":"山脊阵地","x":3500,"y":4000,"type":"infantry","size":45,"points":100,"health":1},
+      {"id":"T4","name":"通讯塔","x":8500,"y":3000,"type":"command","size":30,"points":250,"health":2},
+      {"id":"T5","name":"燃料库","x":6000,"y":2000,"type":"ammo","size":50,"points":220,"health":1},
+      {"id":"T6","name":"机枪巢","x":2500,"y":5500,"type":"bunker","size":25,"points":90,"health":1}
+    ],
+    "terrain":{
+      "water":[{"x":7500,"y":7000,"w":2000,"h":1500}],
+      "forest":[{"x":1500,"y":3000,"w":1800,"h":2000},{"x":5500,"y":1500,"w":2500,"h":1200}],
+      "hills":[{"x":4000,"y":5000,"radius":900,"height":200},{"x":7000,"y":3500,"radius":600,"height":150},{"x":3000,"y":7000,"radius":500,"height":100}],
+      "roads":[{"points":[[0,8500],[3000,8000],[6000,6000],[9000,4000]]}]
+    }
+  }
+]
+</script>
+
+<script>
+'use strict';
+/* ============================================================
+   炮兵瞄准模拟器 —— 主程序
+   ============================================================ */
+
+// ===== 加载 JSON 数据 =====
+const WEAPONS = JSON.parse(document.getElementById('weapons-data').textContent);
+const MISSIONS = JSON.parse(document.getElementById('missions-data').textContent);
+
+// ===== 物理常量 =====
+const G = 9.81;              // 重力加速度 m/s²
+const MAP_SIZE = 10000;      // 地图尺寸 10km × 10km
+const RHO_AIR = 1.225;       // 空气密度 kg/m³
+
+// ===== DOM =====
+const mapCanvas = document.getElementById('mapCanvas');
+const mapCtx = mapCanvas.getContext('2d');
+const profileCanvas = document.getElementById('profileCanvas');
+const profileCtx = profileCanvas.getContext('2d');
+
+// ===== 全局状态 =====
+const state = {
+  weapon: WEAPONS[0],
+  charge: 5,
+  azimuth: 4500,             // 密位 0-6400（0=北 顺时针）
+  elevation: 45,             // 仰角度
+  wind: { speed: 3, direction: 90 },
+  artilleryPos: { x: 1800, y: 1800 },
+  targets: [],
+  terrain: null,
+  trajectory: [],            // 预测弹道点序列
+  impactPoint: null,         // 预测落点
+  shells: [],                // 飞行中的炮弹
+  explosions: [],            // 爆炸效果
+  muzzleFlash: null,         // 炮口闪光
+  hits: 0, shots: 0, score: 0,
+  targetsDestroyed: 0, totalTargets: 0,
+  log: [],
+  mouseX: -1, mouseY: -1,
+  firing: false,
+  missionIndex: 0,
+};
+
+// ===== 画布尺寸 =====
+let mapW=0, mapH=0, mapDPR=1, profW=0, profH=0, profDPR=1;
+
+function resizeCanvases(){
+  mapDPR = Math.min(window.devicePixelRatio||1, 2);
+  mapW = mapCanvas.clientWidth; mapH = mapCanvas.clientHeight;
+  mapCanvas.width = Math.floor(mapW*mapDPR);
+  mapCanvas.height = Math.floor(mapH*mapDPR);
+  mapCtx.setTransform(mapDPR,0,0,mapDPR,0,0);
+
+  profDPR = Math.min(window.devicePixelRatio||1, 2);
+  profW = profileCanvas.clientWidth; profH = profileCanvas.clientHeight;
+  profileCanvas.width = Math.floor(profW*profDPR);
+  profileCanvas.height = Math.floor(profH*profDPR);
+  profileCtx.setTransform(profDPR,0,0,profDPR,0,0);
+}
+
+// ===== 坐标转换 =====
+function mapToCanvas(mx, my){
+  return { x: (mx/MAP_SIZE)*mapW, y: mapH - (my/MAP_SIZE)*mapH };
+}
+function canvasToMap(cx, cy){
+  return { x: (cx/mapW)*MAP_SIZE, y: ((mapH-cy)/mapH)*MAP_SIZE };
+}
+function milToDeg(mil){ return (mil/6400)*360; }
+function degToMil(deg){ return (deg/360)*6400; }
+
+// ===== 弹道仿真（3D：x=东 y=北 z=高） =====
+function simulateTrajectory(v0, azDeg, elDeg, wind, weapon){
+  const azRad = azDeg*Math.PI/180;
+  const elRad = elDeg*Math.PI/180;
+  const vH = v0*Math.cos(elRad);
+  let vx = vH*Math.sin(azRad);
+  let vy = vH*Math.cos(azRad);
+  let vz = v0*Math.sin(elRad);
+  let x=0, y=0, z=0, t=0;
+  const dt = 0.02;
+  const pts = [{x:0,y:0,z:0,t:0}];
+
+  const wRad = wind.direction*Math.PI/180;
+  const wvx = wind.speed*Math.sin(wRad);
+  const wvy = wind.speed*Math.cos(wRad);
+
+  const area = Math.PI*Math.pow(weapon.diameter/2, 2);
+  const dragK = 0.5*RHO_AIR*weapon.dragCoef*area/weapon.projectileMass;
+
+  while(t < 120){
+    const rvx=vx-wvx, rvy=vy-wvy, rvz=vz;
+    const sp = Math.sqrt(rvx*rvx+rvy*rvy+rvz*rvz);
+    if(sp > 0.01){
+      const dec = dragK*sp*sp;
+      vx -= dec*rvx/sp*dt;
+      vy -= dec*rvy/sp*dt;
+      vz -= dec*rvz/sp*dt;
+    }
+    vz -= G*dt;
+    x += vx*dt; y += vy*dt; z += vz*dt; t += dt;
+    if(z < 0){
+      const prev = pts[pts.length-1];
+      const r = prev.z/(prev.z - z);
+      pts.push({ x: prev.x+(x-prev.x)*r, y: prev.y+(y-prev.y)*r, z:0, t: prev.t+dt*r });
+      break;
+    }
+    pts.push({x,y,z,t});
+  }
+  return pts;
+}
+
+function calculateTrajectory(){
+  const v0 = state.weapon.muzzleVelocity * state.weapon.chargeMultiplier[state.charge-1];
+  const azDeg = milToDeg(state.azimuth);
+  state.trajectory = simulateTrajectory(v0, azDeg, state.elevation, state.wind, state.weapon);
+  if(state.trajectory.length > 0){
+    const last = state.trajectory[state.trajectory.length-1];
+    state.impactPoint = { x: state.artilleryPos.x+last.x, y: state.artilleryPos.y+last.y, t: last.t };
+  }
+}
+
+// ===== 地图渲染 =====
+function drawMap(){
+  mapCtx.fillStyle = '#0a0d0a';
+  mapCtx.fillRect(0,0,mapW,mapH);
+  drawTerrain();
+  drawGrid();
+  drawRangeRings();
+  drawRoads();
+  drawTargets();
+  drawTrajectoryTrack();
+  drawArtillery();
+  drawPredictedImpact();
+  drawShells();
+  drawExplosions();
+  drawMouseCursor();
+  drawCompass();
+  drawScaleBar();
+}
+
+function drawTerrain(){
+  if(!state.terrain) return;
+  // 水域
+  mapCtx.fillStyle = 'rgba(30,60,90,.45)';
+  mapCtx.strokeStyle = 'rgba(60,120,180,.3)';
+  mapCtx.lineWidth = 1;
+  (state.terrain.water||[]).forEach(w=>{
+    const p1 = mapToCanvas(w.x, w.y+w.h);
+    const p2 = mapToCanvas(w.x+w.w, w.y);
+    mapCtx.fillRect(p1.x, p1.y, p2.x-p1.x, p2.y-p1.y);
+    mapCtx.strokeRect(p1.x, p1.y, p2.x-p1.x, p2.y-p1.y);
+  });
+  // 森林
+  (state.terrain.forest||[]).forEach(f=>{
+    const p1 = mapToCanvas(f.x, f.y+f.h);
+    const p2 = mapToCanvas(f.x+f.w, f.y);
+    mapCtx.fillStyle = 'rgba(20,50,25,.4)';
+    mapCtx.fillRect(p1.x, p1.y, p2.x-p1.x, p2.y-p1.y);
+    mapCtx.fillStyle = 'rgba(40,80,40,.35)';
+    const cnt = Math.floor(f.w*f.h/80000);
+    for(let i=0;i<cnt;i++){
+      const tp = mapToCanvas(f.x+Math.random()*f.w, f.y+Math.random()*f.h);
+      mapCtx.beginPath(); mapCtx.arc(tp.x, tp.y, 2.5, 0, Math.PI*2); mapCtx.fill();
+    }
+  });
+  // 等高线
+  mapCtx.strokeStyle = 'rgba(120,90,40,.25)';
+  mapCtx.lineWidth = 1;
+  (state.terrain.hills||[]).forEach(h=>{
+    const c = mapToCanvas(h.x, h.y);
+    const rPx = (h.radius/MAP_SIZE)*mapW;
+    for(let i=1;i<=3;i++){
+      mapCtx.beginPath();
+      mapCtx.arc(c.x, c.y, rPx*(i/3), 0, Math.PI*2);
+      mapCtx.stroke();
+    }
+  });
+}
+
+function drawGrid(){
+  mapCtx.strokeStyle = 'rgba(255,176,0,.05)';
+  mapCtx.lineWidth = 1;
+  const step = 1000;
+  for(let i=0;i<=MAP_SIZE;i+=step){
+    const px = (i/MAP_SIZE)*mapW;
+    mapCtx.beginPath(); mapCtx.moveTo(px,0); mapCtx.lineTo(px,mapH); mapCtx.stroke();
+    const py = mapH - (i/MAP_SIZE)*mapH;
+    mapCtx.beginPath(); mapCtx.moveTo(0,py); mapCtx.lineTo(mapW,py); mapCtx.stroke();
+  }
+  // 网格标签
+  mapCtx.fillStyle = 'rgba(255,176,0,.2)';
+  mapCtx.font = '10px "Share Tech Mono",monospace';
+  mapCtx.textAlign = 'center'; mapCtx.textBaseline = 'top';
+  const letters = 'ABCDEFGHIJ';
+  for(let i=0;i<10;i++){
+    const px = ((i*step+step/2)/MAP_SIZE)*mapW;
+    mapCtx.fillText(letters[i], px, 4);
+  }
+  mapCtx.textAlign = 'left';
+  for(let i=0;i<10;i++){
+    const py = mapH - ((i*step+step/2)/MAP_SIZE)*mapH;
+    mapCtx.fillText(String(10-i), 4, py-5);
+  }
+}
+
+function drawRangeRings(){
+  const c = mapToCanvas(state.artilleryPos.x, state.artilleryPos.y);
+  mapCtx.strokeStyle = 'rgba(255,176,0,.07)';
+  mapCtx.lineWidth = 1;
+  mapCtx.setLineDash([3,6]);
+  for(let r=1000;r<=10000;r+=1000){
+    const rPx = (r/MAP_SIZE)*mapW;
+    mapCtx.beginPath(); mapCtx.arc(c.x, c.y, rPx, 0, Math.PI*2); mapCtx.stroke();
+  }
+  mapCtx.setLineDash([]);
+  mapCtx.fillStyle = 'rgba(255,176,0,.15)';
+  mapCtx.font = '9px "Share Tech Mono",monospace';
+  mapCtx.textAlign = 'left';
+  for(let r=2000;r<=8000;r+=2000){
+    const rPx = (r/MAP_SIZE)*mapW;
+    mapCtx.fillText(r+'m', c.x+rPx+3, c.y-2);
+  }
+}
+
+function drawRoads(){
+  if(!state.terrain||!state.terrain.roads) return;
+  mapCtx.strokeStyle = 'rgba(100,80,40,.4)';
+  mapCtx.lineWidth = 2;
+  state.terrain.roads.forEach(road=>{
+    mapCtx.beginPath();
+    road.points.forEach((pt,i)=>{
+      const p = mapToCanvas(pt[0],pt[1]);
+      if(i===0) mapCtx.moveTo(p.x,p.y); else mapCtx.lineTo(p.x,p.y);
+    });
+    mapCtx.stroke();
+  });
+}
+
+function drawTargets(){
+  state.targets.forEach(t=>{
+    if(t.destroyed) return;
+    const p = mapToCanvas(t.x, t.y);
+    const sPx = Math.max(6, (t.size/MAP_SIZE)*mapW);
+    mapCtx.strokeStyle = '#ff3344';
+    mapCtx.lineWidth = 1.5;
+    mapCtx.fillStyle = 'rgba(255,51,68,.15)';
+    mapCtx.beginPath();
+    if(t.type==='bunker'){
+      mapCtx.rect(p.x-sPx, p.y-sPx, sPx*2, sPx*2);
+    }else if(t.type==='vehicle'){
+      mapCtx.moveTo(p.x,p.y-sPx); mapCtx.lineTo(p.x+sPx,p.y);
+      mapCtx.lineTo(p.x,p.y+sPx); mapCtx.lineTo(p.x-sPx,p.y); mapCtx.closePath();
+    }else if(t.type==='infantry'){
+      mapCtx.arc(p.x,p.y,sPx,0,Math.PI*2);
+    }else if(t.type==='command'){
+      mapCtx.moveTo(p.x-sPx,p.y-sPx); mapCtx.lineTo(p.x+sPx,p.y+sPx);
+      mapCtx.moveTo(p.x+sPx,p.y-sPx); mapCtx.lineTo(p.x-sPx,p.y+sPx);
+    }else{
+      mapCtx.moveTo(p.x,p.y-sPx); mapCtx.lineTo(p.x+sPx,p.y+sPx);
+      mapCtx.lineTo(p.x-sPx,p.y+sPx); mapCtx.closePath();
+    }
+    mapCtx.fill(); mapCtx.stroke();
+    // 标签
+    mapCtx.fillStyle = 'rgba(255,51,68,.7)';
+    mapCtx.font = '10px "Share Tech Mono",monospace';
+    mapCtx.textAlign = 'left'; mapCtx.textBaseline = 'top';
+    mapCtx.fillText(t.name, p.x+sPx+4, p.y-sPx);
+    // 血条
+    if(t.health < t.maxHealth){
+      mapCtx.fillStyle = 'rgba(255,51,68,.2)';
+      mapCtx.fillRect(p.x-sPx, p.y+sPx+3, sPx*2, 2);
+      mapCtx.fillStyle = '#ff3344';
+      mapCtx.fillRect(p.x-sPx, p.y+sPx+3, sPx*2*(t.health/t.maxHealth), 2);
+    }
+  });
+}
+
+function drawTrajectoryTrack(){
+  if(state.trajectory.length < 2) return;
+  mapCtx.strokeStyle = 'rgba(255,176,0,.25)';
+  mapCtx.lineWidth = 1;
+  mapCtx.setLineDash([4,4]);
+  mapCtx.beginPath();
+  state.trajectory.forEach((pt,i)=>{
+    const p = mapToCanvas(state.artilleryPos.x+pt.x, state.artilleryPos.y+pt.y);
+    if(i===0) mapCtx.moveTo(p.x,p.y); else mapCtx.lineTo(p.x,p.y);
+  });
+  mapCtx.stroke();
+  mapCtx.setLineDash([]);
+}
+
+function drawArtillery(){
+  const p = mapToCanvas(state.artilleryPos.x, state.artilleryPos.y);
+  const azRad = milToDeg(state.azimuth)*Math.PI/180;
+  // 射向指示线
+  mapCtx.strokeStyle = 'rgba(68,153,255,.25)';
+  mapCtx.lineWidth = 1;
+  mapCtx.beginPath();
+  mapCtx.moveTo(p.x, p.y);
+  mapCtx.lineTo(p.x+Math.sin(azRad)*45, p.y-Math.cos(azRad)*45);
+  mapCtx.stroke();
+  // 炮口闪光
+  if(state.muzzleFlash){
+    const e = performance.now() - state.muzzleFlash.startTime;
+    if(e < state.muzzleFlash.duration){
+      const pr = e/state.muzzleFlash.duration;
+      const fr = 12 + pr*25;
+      mapCtx.fillStyle = `rgba(255,200,0,${(1-pr)*0.7})`;
+      mapCtx.beginPath();
+      mapCtx.arc(p.x+Math.sin(azRad)*14, p.y-Math.cos(azRad)*14, fr, 0, Math.PI*2);
+      mapCtx.fill();
+    } else { state.muzzleFlash = null; }
+  }
+  // 炮位符号
+  mapCtx.strokeStyle = '#4499ff';
+  mapCtx.lineWidth = 2;
+  mapCtx.fillStyle = 'rgba(68,153,255,.2)';
+  mapCtx.beginPath(); mapCtx.arc(p.x, p.y, 10, 0, Math.PI*2); mapCtx.fill(); mapCtx.stroke();
+  mapCtx.fillStyle = '#4499ff';
+  mapCtx.beginPath(); mapCtx.arc(p.x, p.y, 3, 0, Math.PI*2); mapCtx.fill();
+  // 标签
+  mapCtx.fillStyle = 'rgba(68,153,255,.8)';
+  mapCtx.font = '10px "Share Tech Mono",monospace';
+  mapCtx.textAlign = 'left'; mapCtx.textBaseline = 'top';
+  mapCtx.fillText('我方炮位', p.x+14, p.y-14);
+}
+
+function drawPredictedImpact(){
+  if(!state.impactPoint) return;
+  const p = mapToCanvas(state.impactPoint.x, state.impactPoint.y);
+  const dPx = (state.weapon.dispersion/MAP_SIZE)*mapW;
+  // 散布圆
+  mapCtx.strokeStyle = 'rgba(255,176,0,.2)';
+  mapCtx.lineWidth = 1;
+  mapCtx.beginPath(); mapCtx.arc(p.x, p.y, dPx, 0, Math.PI*2); mapCtx.stroke();
+  // 十字准星
+  mapCtx.strokeStyle = '#ffb000';
+  mapCtx.lineWidth = 1.5;
+  const cs = 8;
+  mapCtx.beginPath();
+  mapCtx.moveTo(p.x-cs,p.y); mapCtx.lineTo(p.x-3,p.y);
+  mapCtx.moveTo(p.x+3,p.y); mapCtx.lineTo(p.x+cs,p.y);
+  mapCtx.moveTo(p.x,p.y-cs); mapCtx.lineTo(p.x,p.y-3);
+  mapCtx.moveTo(p.x,p.y+3); mapCtx.lineTo(p.x,p.y+cs);
+  mapCtx.stroke();
+  mapCtx.fillStyle = '#ffb000';
+  mapCtx.beginPath(); mapCtx.arc(p.x, p.y, 1.5, 0, Math.PI*2); mapCtx.fill();
+}
+
+function drawShells(){
+  state.shells.forEach(shell=>{
+    const p = mapToCanvas(state.artilleryPos.x+shell.x, state.artilleryPos.y+shell.y);
+    mapCtx.fillStyle = '#ffd870';
+    mapCtx.shadowColor = '#ffb000';
+    mapCtx.shadowBlur = 8;
+    mapCtx.beginPath(); mapCtx.arc(p.x, p.y, 3, 0, Math.PI*2); mapCtx.fill();
+    mapCtx.shadowBlur = 0;
+  });
+}
+
+function drawExplosions(){
+  const now = performance.now();
+  state.explosions = state.explosions.filter(exp=>{
+    const e = (now - exp.startTime)/1000;
+    if(e > exp.duration) return false;
+    const pr = e/exp.duration;
+    const p = mapToCanvas(exp.x, exp.y);
+    const rPx = (exp.radius/MAP_SIZE)*mapW;
+    mapCtx.strokeStyle = `rgba(255,176,0,${1-pr})`;
+    mapCtx.lineWidth = 2;
+    mapCtx.beginPath(); mapCtx.arc(p.x, p.y, rPx*pr, 0, Math.PI*2); mapCtx.stroke();
+    mapCtx.fillStyle = `rgba(255,100,0,${(1-pr)*0.3})`;
+    mapCtx.beginPath(); mapCtx.arc(p.x, p.y, rPx*pr, 0, Math.PI*2); mapCtx.fill();
+    exp.particles.forEach(pt=>{
+      const px = p.x + pt.vx*e;
+      const py = p.y + pt.vy*e;
+      mapCtx.fillStyle = `rgba(255,${176+pr*79},${pr*100|0},${1-pr})`;
+      mapCtx.beginPath(); mapCtx.arc(px, py, 2*(1-pr), 0, Math.PI*2); mapCtx.fill();
+    });
+    return true;
+  });
+}
+
+function drawMouseCursor(){
+  if(state.mouseX < 0) return;
+  mapCtx.strokeStyle = 'rgba(255,176,0,.2)';
+  mapCtx.lineWidth = 1;
+  mapCtx.setLineDash([2,4]);
+  mapCtx.beginPath();
+  mapCtx.moveTo(state.mouseX, 0); mapCtx.lineTo(state.mouseX, mapH);
+  mapCtx.moveTo(0, state.mouseY); mapCtx.lineTo(mapW, state.mouseY);
+  mapCtx.stroke();
+  mapCtx.setLineDash([]);
+}
+
+function drawCompass(){
+  const cx = mapW-50, cy = 50, r = 25;
+  mapCtx.strokeStyle = 'rgba(255,176,0,.3)';
+  mapCtx.lineWidth = 1;
+  mapCtx.beginPath(); mapCtx.arc(cx, cy, r, 0, Math.PI*2); mapCtx.stroke();
+  mapCtx.fillStyle = '#ff3344';
+  mapCtx.beginPath();
+  mapCtx.moveTo(cx, cy-r); mapCtx.lineTo(cx-4, cy-r+8); mapCtx.lineTo(cx+4, cy-r+8);
+  mapCtx.closePath(); mapCtx.fill();
+  mapCtx.fillStyle = 'rgba(255,176,0,.5)';
+  mapCtx.font = '10px "Share Tech Mono",monospace';
+  mapCtx.textAlign = 'center'; mapCtx.textBaseline = 'middle';
+  mapCtx.fillText('N', cx, cy-r-8);
+}
+
+function drawScaleBar(){
+  const bl = (1000/MAP_SIZE)*mapW;
+  const x = 20, y = mapH-30;
+  mapCtx.strokeStyle = 'rgba(255,176,0,.4)';
+  mapCtx.lineWidth = 1;
+  mapCtx.beginPath();
+  mapCtx.moveTo(x,y); mapCtx.lineTo(x+bl,y);
+  mapCtx.moveTo(x,y-3); mapCtx.lineTo(x,y+3);
+  mapCtx.moveTo(x+bl,y-3); mapCtx.lineTo(x+bl,y+3);
+  mapCtx.stroke();
+  mapCtx.fillStyle = 'rgba(255,176,0,.5)';
+  mapCtx.font = '10px "Share Tech Mono",monospace';
+  mapCtx.textAlign = 'center'; mapCtx.textBaseline = 'top';
+  mapCtx.fillText('1 km', x+bl/2, y+5);
+}
+
+// ===== 弹道剖面渲染 =====
+function drawProfile(){
+  profileCtx.fillStyle = '#0a0d0a';
+  profileCtx.fillRect(0,0,profW,profH);
+  profileCtx.strokeStyle = 'rgba(255,176,0,.05)';
+  profileCtx.lineWidth = 1;
+  for(let i=0;i<=5;i++){
+    const y = (profH/5)*i;
+    profileCtx.beginPath(); profileCtx.moveTo(0,y); profileCtx.lineTo(profW,y); profileCtx.stroke();
+    const x = (profW/5)*i;
+    profileCtx.beginPath(); profileCtx.moveTo(x,0); profileCtx.lineTo(x,profH); profileCtx.stroke();
+  }
+  if(state.trajectory.length < 2) return;
+
+  const last = state.trajectory[state.trajectory.length-1];
+  const maxR = Math.sqrt(last.x*last.x + last.y*last.y);
+  const maxA = Math.max(...state.trajectory.map(p=>p.z));
+  const mX = 20, mY = 15, dW = profW-mX*2, dH = profH-mY*2;
+
+  // 地面线
+  profileCtx.strokeStyle = 'rgba(255,176,0,.2)';
+  profileCtx.lineWidth = 1;
+  profileCtx.beginPath();
+  profileCtx.moveTo(mX, profH-mY); profileCtx.lineTo(profW-mX, profH-mY);
+  profileCtx.stroke();
+
+  // 弹道弧
+  profileCtx.strokeStyle = '#ffb000';
+  profileCtx.lineWidth = 2;
+  profileCtx.shadowColor = '#ffb000';
+  profileCtx.shadowBlur = 4;
+  profileCtx.beginPath();
+  state.trajectory.forEach((pt,i)=>{
+    const r = Math.sqrt(pt.x*pt.x + pt.y*pt.y);
+    const px = mX + (r/Math.max(maxR,1))*dW;
+    const py = profH - mY - (pt.z/Math.max(maxA,1))*dH;
+    if(i===0) profileCtx.moveTo(px,py); else profileCtx.lineTo(px,py);
+  });
+  profileCtx.stroke();
+  profileCtx.shadowBlur = 0;
+
+  // 飞行中炮弹位置
+  state.shells.forEach(shell=>{
+    const r = Math.sqrt(shell.x*shell.x + shell.y*shell.y);
+    const px = mX + (r/Math.max(maxR,1))*dW;
+    const py = profH - mY - (shell.z/Math.max(maxA,1))*dH;
+    profileCtx.fillStyle = '#ffd870';
+    profileCtx.beginPath(); profileCtx.arc(px, py, 3, 0, Math.PI*2); profileCtx.fill();
+  });
+
+  // 标签
+  profileCtx.fillStyle = 'rgba(255,176,0,.4)';
+  profileCtx.font = '9px "Share Tech Mono",monospace';
+  profileCtx.textAlign = 'left'; profileCtx.textBaseline = 'top';
+  profileCtx.fillText('高度', 4, 4);
+  profileCtx.textAlign = 'right'; profileCtx.textBaseline = 'bottom';
+  profileCtx.fillText(Math.round(maxA)+'m', profW-4, profH-4);
+  profileCtx.textAlign = 'left';
+  profileCtx.fillText(Math.round(maxR)+'m', 4, profH-4);
+}
+
+// ===== 开火 =====
+function fire(){
+  if(state.firing || state.trajectory.length === 0) return;
+  state.firing = true;
+  state.shots++;
+
+  const last = state.trajectory[state.trajectory.length-1];
+  // 散布（偏向中心的随机偏移）
+  const dAng = Math.random()*Math.PI*2;
+  const dDist = Math.random()*Math.random()*state.weapon.dispersion;
+  const ax = last.x + Math.cos(dAng)*dDist;
+  const ay = last.y + Math.sin(dAng)*dDist;
+
+  const visDur = Math.min(2.5, Math.max(1, last.t/15));
+  state.shells.push({
+    trajectory: state.trajectory.slice(),
+    actualImpact: { x: ax, y: ay },
+    startTime: performance.now(),
+    duration: visDur*1000,
+    x: 0, y: 0, z: 0, done: false,
+  });
+
+  state.muzzleFlash = { startTime: performance.now(), duration: 200 };
+  playFireSound();
+  addLog(`开火 → 方位${state.azimuth}mil 仰角${state.elevation.toFixed(1)}° 装药${state.charge}`, '');
+  document.getElementById('fireBtn').disabled = true;
+  setTimeout(()=>{
+    state.firing = false;
+    document.getElementById('fireBtn').disabled = false;
+  }, visDur*1000 + 500);
+}
+
+function updateShells(){
+  const now = performance.now();
+  state.shells = state.shells.filter(shell=>{
+    const e = now - shell.startTime;
+    const pr = e/shell.duration;
+    if(pr >= 1){
+      if(!shell.done){
+        shell.done = true;
+        const ix = shell.actualImpact.x + state.artilleryPos.x;
+        const iy = shell.actualImpact.y + state.artilleryPos.y;
+        createExplosion(ix, iy);
+        checkHits(ix, iy);
+      }
+      return false;
+    }
+    const idx = Math.floor(pr*(shell.trajectory.length-1));
+    const frac = pr*(shell.trajectory.length-1) - idx;
+    if(idx >= shell.trajectory.length-1){
+      shell.x = shell.actualImpact.x; shell.y = shell.actualImpact.y; shell.z = 0;
+    } else {
+      const p1 = shell.trajectory[idx], p2 = shell.trajectory[idx+1];
+      shell.x = p1.x+(p2.x-p1.x)*frac;
+      shell.y = p1.y+(p2.y-p1.y)*frac;
+      shell.z = p1.z+(p2.z-p1.z)*frac;
+      if(pr > 0.8){
+        const b = (pr-0.8)/0.2;
+        shell.x = shell.x*(1-b) + shell.actualImpact.x*b;
+        shell.y = shell.y*(1-b) + shell.actualImpact.y*b;
+      }
+    }
+    return true;
+  });
+}
+
+function createExplosion(mx, my){
+  const br = state.weapon.blastRadius;
+  const particles = [];
+  for(let i=0;i<15;i++){
+    const a = (i/15)*Math.PI*2 + Math.random()*0.3;
+    const s = 20 + Math.random()*40;
+    particles.push({ vx: Math.cos(a)*s, vy: Math.sin(a)*s });
+  }
+  state.explosions.push({ x:mx, y:my, radius:br, startTime:performance.now(), duration:0.8, particles });
+  playExplosionSound();
+}
+
+function checkHits(ix, iy){
+  const br = state.weapon.blastRadius;
+  let hit=false, destroyed=false, pts=0;
+  state.targets.forEach(t=>{
+    if(t.destroyed) return;
+    const d = Math.sqrt((t.x-ix)**2 + (t.y-iy)**2);
+    if(d <= br + t.size){
+      hit = true;
+      t.health--;
+      pts += 50;
+      if(t.health <= 0){
+        t.destroyed = true;
+        destroyed = true;
+        state.targetsDestroyed++;
+        pts += t.points;
+      }
+    }
+  });
+  if(hit){
+    state.hits++; state.score += pts;
+    if(destroyed){ showToast('目标摧毁！','hit'); addLog(`命中！+${pts}分 目标摧毁`,'destroyed'); }
+    else { showToast('命中！','hit'); addLog(`命中！+${pts}分`,'hit'); }
+  } else {
+    showToast('未命中','miss');
+    addLog('未命中','miss');
+  }
+  updateScoreDisplay();
+  if(state.targetsDestroyed >= state.totalTargets){
+    setTimeout(()=>showMissionComplete(), 1000);
+  }
+}
+
+// ===== 音效 =====
+let audioCtx = null;
+function initAudio(){
+  if(audioCtx) return;
+  try { audioCtx = new (window.AudioContext||window.webkitAudioContext)(); } catch(e){}
+}
+function playFireSound(){
+  if(!audioCtx) return;
+  const now = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator(), g = audioCtx.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(80, now);
+  osc.frequency.exponentialRampToValueAtTime(30, now+0.3);
+  g.gain.setValueAtTime(0.4, now);
+  g.gain.exponentialRampToValueAtTime(0.001, now+0.4);
+  osc.connect(g).connect(audioCtx.destination);
+  osc.start(now); osc.stop(now+0.4);
+  const buf = audioCtx.createBuffer(1, audioCtx.sampleRate*0.2, audioCtx.sampleRate);
+  const d = buf.getChannelData(0);
+  for(let i=0;i<d.length;i++) d[i] = (Math.random()*2-1)*(1-i/d.length);
+  const n = audioCtx.createBufferSource(); n.buffer = buf;
+  const ng = audioCtx.createGain(); ng.gain.value = 0.25;
+  const f = audioCtx.createBiquadFilter(); f.type='lowpass'; f.frequency.value=200;
+  n.connect(f).connect(ng).connect(audioCtx.destination); n.start(now);
+}
+function playExplosionSound(){
+  if(!audioCtx) return;
+  const now = audioCtx.currentTime;
+  const buf = audioCtx.createBuffer(1, audioCtx.sampleRate*0.5, audioCtx.sampleRate);
+  const d = buf.getChannelData(0);
+  for(let i=0;i<d.length;i++) d[i] = (Math.random()*2-1)*Math.pow(1-i/d.length,2);
+  const n = audioCtx.createBufferSource(); n.buffer = buf;
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(0.35, now);
+  g.gain.exponentialRampToValueAtTime(0.001, now+0.5);
+  const f = audioCtx.createBiquadFilter(); f.type='lowpass';
+  f.frequency.setValueAtTime(800, now);
+  f.frequency.exponentialRampToValueAtTime(100, now+0.5);
+  n.connect(f).connect(g).connect(audioCtx.destination); n.start(now);
+}
+
+// ===== UI 更新 =====
+function updateScoreDisplay(){
+  document.getElementById('hitsValue').textContent = state.hits;
+  document.getElementById('shotsValue').textContent = state.shots;
+  document.getElementById('scoreValue').textContent = state.score;
+  document.getElementById('targetsValue').textContent = `${state.targetsDestroyed}/${state.totalTargets}`;
+}
+
+function updateReadouts(){
+  if(state.impactPoint && state.trajectory.length > 0){
+    const last = state.trajectory[state.trajectory.length-1];
+    const range = Math.sqrt(last.x*last.x + last.y*last.y);
+    const maxAlt = Math.max(...state.trajectory.map(p=>p.z));
+    document.getElementById('rangeDisplay').textContent = Math.round(range) + ' m';
+    document.getElementById('flightTimeDisplay').textContent = last.t.toFixed(1) + ' s';
+    document.getElementById('maxAltDisplay').textContent = Math.round(maxAlt) + ' m';
+    document.getElementById('dispersionDisplay').textContent = '±' + state.weapon.dispersion + ' m';
+  }
+  const dirNames = ['北','东北','东','东南','南','西南','西','西北'];
+  const dirIdx = Math.round(state.wind.direction/45) % 8;
+  document.getElementById('windSpeedDisplay').textContent = state.wind.speed.toFixed(1) + ' m/s';
+  document.getElementById('windDirDisplay').textContent = '吹向' + dirNames[dirIdx];
+  document.getElementById('windArrow').style.transform = `translate(-50%,-100%) rotate(${state.wind.direction}deg)`;
+  document.getElementById('windReadout').textContent = `${state.wind.speed.toFixed(1)}m/s ${dirNames[dirIdx]}`;
+  document.getElementById('batteryReadout').textContent = `${state.artilleryPos.x.toFixed(0)},${state.artilleryPos.y.toFixed(0)}`;
+}
+
+function updateControlDisplays(){
+  document.getElementById('azDisplay').textContent = String(state.azimuth).padStart(4,'0');
+  document.getElementById('azimuthSlider').value = state.azimuth;
+  document.getElementById('azimuthInput').value = state.azimuth;
+  document.getElementById('elDisplay').textContent = state.elevation.toFixed(1);
+  document.getElementById('elevationSlider').value = state.elevation;
+  document.getElementById('elevationInput').value = state.elevation.toFixed(1);
+  document.getElementById('chargeDisplay').textContent = state.charge;
+}
+
+function addLog(msg, type){
+  const t = new Date();
+  const ts = String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0')+':'+String(t.getSeconds()).padStart(2,'0');
+  state.log.unshift({ time:ts, message:msg, type });
+  if(state.log.length > 50) state.log.pop();
+  document.getElementById('logEntries').innerHTML = state.log.map(e=>
+    `<div class="log-entry ${e.type||''}"><span class="time">${e.time}</span><span>${e.message}</span></div>`
+  ).join('');
+}
+
+function showToast(text, type){
+  const t = document.getElementById('toast');
+  t.textContent = text;
+  t.className = 'toast show ' + (type||'');
+  setTimeout(()=>{ t.className = 'toast ' + (type||''); }, 1500);
+}
+
+function showMissionComplete(){
+  const acc = state.shots > 0 ? Math.round((state.hits/state.shots)*100) : 0;
+  document.getElementById('missionStats').innerHTML =
+    `发射弹药：${state.shots} 发<br>命中目标：${state.hits} 次<br>命中精度：${acc}%<br>最终得分：${state.score} 分`;
+  document.getElementById('missionComplete').classList.add('show');
+}
+
+// ===== 任务加载 =====
+function loadMission(idx){
+  const m = MISSIONS[idx % MISSIONS.length];
+  state.artilleryPos = { x: m.artilleryPos[0], y: m.artilleryPos[1] };
+  state.targets = m.targets.map(t=>({ ...t, maxHealth: t.health, destroyed: false }));
+  state.terrain = m.terrain;
+  state.totalTargets = state.targets.length;
+  state.targetsDestroyed = 0;
+  state.hits = 0; state.shots = 0; state.score = 0;
+  state.log = []; state.shells = []; state.explosions = [];
+  state.missionIndex = idx;
+  state.wind = { speed: 1+Math.random()*6, direction: Math.random()*360 };
+
+  // 初始瞄准最近目标
+  let nearest=null, nd=Infinity;
+  state.targets.forEach(t=>{
+    const d = Math.sqrt((t.x-state.artilleryPos.x)**2 + (t.y-state.artilleryPos.y)**2);
+    if(d < nd){ nd=d; nearest=t; }
+  });
+  if(nearest){
+    const dx = nearest.x - state.artilleryPos.x;
+    const dy = nearest.y - state.artilleryPos.y;
+    let azDeg = Math.atan2(dx, dy)*180/Math.PI;
+    if(azDeg < 0) azDeg += 360;
+    state.azimuth = Math.round(degToMil(azDeg));
+  }
+
+  updateScoreDisplay();
+  calculateTrajectory();
+  updateReadouts();
+  document.getElementById('logEntries').innerHTML = '';
+  addLog(`任务开始：${m.name}`,'');
+  addLog(`部署炮位 ${state.artilleryPos.x.toFixed(0)},${state.artilleryPos.y.toFixed(0)}`,'');
+  addLog(`发现 ${state.totalTargets} 个敌方目标`,'');
+}
+
+// ===== 控件初始化 =====
+function updateChargeButtons(){
+  const c = document.getElementById('chargeButtons');
+  c.innerHTML = '';
+  state.weapon.charges.forEach(ch=>{
+    const b = document.createElement('button');
+    b.className = 'charge-btn' + (ch===state.charge ? ' active' : '');
+    b.textContent = ch;
+    b.addEventListener('click', ()=>{
+      state.charge = ch;
+      document.querySelectorAll('.charge-btn').forEach(x=>x.classList.remove('active'));
+      b.classList.add('active');
+      document.getElementById('chargeDisplay').textContent = ch;
+      calculateTrajectory(); updateReadouts();
+    });
+    c.appendChild(b);
+  });
+}
+
+function setupControls(){
+  // 武器选择
+  const ws = document.getElementById('weaponSelect');
+  WEAPONS.forEach((w,i)=>{
+    const b = document.createElement('button');
+    b.className = 'weapon-btn' + (i===0 ? ' active' : '');
+    b.textContent = w.shortName;
+    b.title = w.name;
+    b.addEventListener('click', ()=>{
+      state.weapon = w;
+      state.charge = w.charges[Math.floor(w.charges.length/2)];
+      document.querySelectorAll('.weapon-btn').forEach(x=>x.classList.remove('active'));
+      b.classList.add('active');
+      updateChargeButtons();
+      state.elevation = Math.max(w.minElevation, Math.min(w.maxElevation, state.elevation));
+      document.getElementById('elevationSlider').min = w.minElevation;
+      document.getElementById('elevationSlider').max = w.maxElevation;
+      document.getElementById('elevationInput').min = w.minElevation;
+      document.getElementById('elevationInput').max = w.maxElevation;
+      calculateTrajectory(); updateControlDisplays(); updateReadouts();
+    });
+    ws.appendChild(b);
+  });
+  updateChargeButtons();
+
+  // 方位角
+  const azS = document.getElementById('azimuthSlider');
+  const azI = document.getElementById('azimuthInput');
+  azS.addEventListener('input', ()=>{ state.azimuth = parseInt(azS.value); calculateTrajectory(); updateControlDisplays(); updateReadouts(); });
+  azI.addEventListener('input', ()=>{ state.azimuth = Math.max(0,Math.min(6400,parseInt(azI.value)||0)); calculateTrajectory(); updateControlDisplays(); updateReadouts(); });
+
+  // 仰角
+  const elS = document.getElementById('elevationSlider');
+  const elI = document.getElementById('elevationInput');
+  elS.addEventListener('input', ()=>{ state.elevation = parseFloat(elS.value); calculateTrajectory(); updateControlDisplays(); updateReadouts(); });
+  elI.addEventListener('input', ()=>{ state.elevation = Math.max(state.weapon.minElevation,Math.min(state.weapon.maxElevation,parseFloat(elI.value)||0)); calculateTrajectory(); updateControlDisplays(); updateReadouts(); });
+
+  // 开火 / 重置
+  document.getElementById('fireBtn').addEventListener('click', ()=>{ initAudio(); fire(); });
+  document.getElementById('resetBtn').addEventListener('click', ()=>{ loadMission(state.missionIndex); });
+  document.getElementById('newMissionBtn').addEventListener('click', ()=>{
+    document.getElementById('missionComplete').classList.remove('show');
+    loadMission(state.missionIndex + 1);
+  });
+
+  // 地图点击 → 设定方位
+  mapCanvas.addEventListener('click', e=>{
+    const r = mapCanvas.getBoundingClientRect();
+    const mp = canvasToMap(e.clientX-r.left, e.clientY-r.top);
+    const dx = mp.x - state.artilleryPos.x;
+    const dy = mp.y - state.artilleryPos.y;
+    let azDeg = Math.atan2(dx, dy)*180/Math.PI;
+    if(azDeg < 0) azDeg += 360;
+    state.azimuth = Math.round(degToMil(azDeg));
+    calculateTrajectory(); updateControlDisplays(); updateReadouts();
+  });
+
+  // 鼠标移动 → 坐标显示
+  mapCanvas.addEventListener('mousemove', e=>{
+    const r = mapCanvas.getBoundingClientRect();
+    state.mouseX = e.clientX - r.left;
+    state.mouseY = e.clientY - r.top;
+    const mp = canvasToMap(state.mouseX, state.mouseY);
+    document.getElementById('coordReadout').textContent = `${mp.x.toFixed(0)}, ${mp.y.toFixed(0)}`;
+    const letters = 'ABCDEFGHIJ';
+    const col = Math.floor(mp.x/1000), row = Math.floor(mp.y/1000);
+    if(col>=0 && col<10 && row>=0 && row<10){
+      document.getElementById('gridReadout').textContent = letters[col] + String(10-row);
+    }
+  });
+  mapCanvas.addEventListener('mouseleave', ()=>{ state.mouseX=-1; state.mouseY=-1; });
+
+  // 键盘
+  document.addEventListener('keydown', e=>{
+    if(e.target.tagName === 'INPUT') return;
+    switch(e.key){
+      case ' ': e.preventDefault(); initAudio(); fire(); break;
+      case 'ArrowLeft': state.azimuth = (state.azimuth-10+6400)%6400; calculateTrajectory(); updateControlDisplays(); updateReadouts(); break;
+      case 'ArrowRight': state.azimuth = (state.azimuth+10)%6400; calculateTrajectory(); updateControlDisplays(); updateReadouts(); break;
+      case 'ArrowUp': state.elevation = Math.min(state.weapon.maxElevation, state.elevation+0.5); calculateTrajectory(); updateControlDisplays(); updateReadouts(); break;
+      case 'ArrowDown': state.elevation = Math.max(state.weapon.minElevation, state.elevation-0.5); calculateTrajectory(); updateControlDisplays(); updateReadouts(); break;
+    }
+  });
+}
+
+// ===== 风速变化 =====
+function updateWind(){
+  state.wind.speed = Math.min(8, Math.max(0, state.wind.speed + (Math.random()-0.5)*0.3));
+  state.wind.direction = (state.wind.direction + (Math.random()-0.5)*5 + 360) % 360;
+}
+
+// ===== 主循环 =====
+let lastWindTs = 0;
+function animate(ts){
+  if(ts - lastWindTs > 3000){
+    updateWind(); calculateTrajectory(); updateReadouts();
+    lastWindTs = ts;
+  }
+  updateShells();
+  drawMap();
+  drawProfile();
+  requestAnimationFrame(animate);
+}
+
+// ===== 初始化 =====
+function init(){
+  resizeCanvases();
+  window.addEventListener('resize', resizeCanvases);
+  setupControls();
+  document.getElementById('elevationSlider').min = state.weapon.minElevation;
+  document.getElementById('elevationSlider').max = state.weapon.maxElevation;
+  document.getElementById('elevationInput').min = state.weapon.minElevation;
+  document.getElementById('elevationInput').max = state.weapon.maxElevation;
+  loadMission(0);
+  updateControlDisplays();
+  requestAnimationFrame(animate);
+}
+init();
+</script>
+</body>
+</html>

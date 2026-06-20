@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CRT // 解密中</title>
+<style>
+  /* ===== 基础重置 ===== */
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;background:#000;overflow:hidden;font-family:"Courier New",monospace}
+
+  /* ===== 显示器外壳与屏幕 ===== */
+  body{display:flex;align-items:center;justify-content:center}
+  .bezel{
+    position:relative;
+    width:min(96vw,1600px);
+    height:min(92vh,920px);
+    padding:26px;
+    border-radius:26px;
+    background:
+      radial-gradient(ellipse at 30% 20%, #2a2a2a 0%, #141414 40%, #050505 100%);
+    box-shadow:
+      0 30px 80px rgba(0,0,0,0.9),
+      inset 0 2px 4px rgba(255,255,255,0.06),
+      inset 0 -3px 10px rgba(0,0,0,0.8);
+  }
+  /* 外壳上的小指示灯 */
+  .bezel::after{
+    content:"";
+    position:absolute;
+    bottom:10px;left:50%;transform:translateX(-50%);
+    width:8px;height:8px;border-radius:50%;
+    background:#33ff66;
+    box-shadow:0 0 8px #33ff66,0 0 16px #00ff66;
+    animation:led 2s infinite;
+  }
+  @keyframes led{0%,100%{opacity:0.4}50%{opacity:1}}
+
+  .screen{
+    position:relative;
+    width:100%;height:100%;
+    border-radius:18px;
+    overflow:hidden;
+    background:#000;
+    /* 轻微 CRT 弧度透视 */
+    transform:perspective(1800px) rotateX(1.5deg);
+    box-shadow:
+      inset 0 0 90px rgba(0,0,0,0.95),
+      inset 0 0 24px rgba(0,255,100,0.05),
+      0 0 2px rgba(0,255,100,0.15);
+  }
+  canvas{display:block;width:100%;height:100%}
+
+  /* 扫描线 */
+  .scanlines{
+    position:absolute;inset:0;pointer-events:none;
+    background:repeating-linear-gradient(
+      0deg,
+      rgba(0,0,0,0.28) 0px,
+      rgba(0,0,0,0.28) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+    mix-blend-mode:multiply;
+    z-index:3;
+  }
+  /* 暗角 */
+  .vignette{
+    position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(ellipse at center, transparent 52%, rgba(0,0,0,0.55) 82%, rgba(0,0,0,0.92) 100%);
+    z-index:4;
+  }
+  /* 整体轻微闪烁 */
+  .flicker{
+    position:absolute;inset:0;pointer-events:none;z-index:5;
+    background:rgba(0,255,100,0.015);
+    animation:flick 0.13s infinite;
+  }
+  @keyframes flick{
+    0%{opacity:0.85}25%{opacity:1}50%{opacity:0.9}75%{opacity:0.98}100%{opacity:0.92}
+  }
+  /* RGB 色散细条（增强 CRT 感） */
+  .rgb{
+    position:absolute;inset:0;pointer-events:none;z-index:2;
+    background:linear-gradient(90deg, rgba(255,0,0,0.02), rgba(0,255,0,0.02), rgba(0,0,255,0.02));
+    background-size:3px 100%;
+  }
+
+  /* ===== 启动覆盖层 ===== */
+  .overlay{
+    position:fixed;inset:0;z-index:50;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    background:radial-gradient(ellipse at center,#021 0%,#000 70%);
+    cursor:pointer;
+    transition:opacity 0.5s ease;
+  }
+  .overlay h1{
+    color:#33ff66;
+    font-size:clamp(28px,5vw,56px);
+    letter-spacing:0.3em;
+    text-shadow:0 0 10px #00ff66,0 0 30px #00ff66,0 0 60px #00ff66;
+    animation:breath 1.6s ease-in-out infinite;
+  }
+  .overlay p{
+    margin-top:18px;color:#1a8c3a;font-size:14px;letter-spacing:0.4em;
+  }
+  @keyframes breath{0%,100%{opacity:0.6}50%{opacity:1}}
+  .overlay.hide{opacity:0;pointer-events:none}
+
+  /* ===== 通用覆盖层（输入/错误/蓝屏/卡片） ===== */
+  .layer{
+    position:absolute;inset:0;z-index:40;
+    display:none;
+  }
+  .layer.show{display:block}
+
+  /* ===== 控制台输入框 ===== */
+  .console-layer{
+    display:none;flex-direction:column;align-items:center;justify-content:center;
+    background:rgba(0,0,0,0.55);
+  }
+  .console-layer.show{display:flex}
+  .console-box{
+    width:min(80%,640px);padding:22px 26px;
+    border:1px solid #1a8c3a;background:rgba(0,20,8,0.85);
+    box-shadow:0 0 24px rgba(0,255,100,0.25),inset 0 0 18px rgba(0,255,100,0.08);
+    font-family:"Courier New",monospace;
+  }
+  .console-prompt{color:#1a8c3a;font-size:14px;letter-spacing:0.1em;margin-bottom:12px}
+  .console-line{display:flex;align-items:center;color:#33ff66;font-size:22px;letter-spacing:0.08em}
+  .console-line .gt{margin-right:10px;text-shadow:0 0 8px #00ff66}
+  .console-input{
+    flex:1;background:transparent;border:none;outline:none;
+    color:#bbffbb;font-family:inherit;font-size:22px;letter-spacing:0.08em;
+    text-shadow:0 0 8px #00ff66;caret-color:#33ff66;
+  }
+  .console-hint{margin-top:14px;color:#0f5c25;font-size:12px;letter-spacing:0.2em}
+  .console-submit{
+    margin-top:16px;display:block;margin-left:auto;margin-right:auto;
+    background:transparent;color:#33ff66;border:1px solid #33ff66;
+    padding:10px 40px;font-family:inherit;font-size:15px;letter-spacing:0.25em;cursor:pointer;
+    text-shadow:0 0 8px #00ff66;
+    box-shadow:0 0 12px rgba(0,255,100,0.3),inset 0 0 12px rgba(0,255,100,0.1);
+    transition:all 0.2s;
+  }
+  .console-submit:hover{background:rgba(0,255,100,0.12);box-shadow:0 0 20px rgba(0,255,100,0.6)}
+  .console-submit:active{transform:scale(0.97)}
+
+  /* ===== 假错误弹窗（Win9x 风格） ===== */
+  .err-layer{overflow:hidden;cursor:not-allowed}
+  .errbox{
+    position:absolute;min-width:220px;max-width:300px;
+    background:#c0c0c0;border:2px solid #000;
+    box-shadow:1px 1px 0 #000, inset 1px 1px 0 #fff, inset -1px -1px 0 #808080;
+    font-family:"MS Sans Serif","Microsoft YaHei",sans-serif;font-size:12px;color:#000;
+    animation:errpop 0.12s ease-out;
+  }
+  @keyframes errpop{from{transform:scale(0.6);opacity:0}to{transform:scale(1);opacity:1}}
+  .errbox .tbar{
+    background:#000080;color:#fff;padding:2px 6px;font-weight:bold;
+    display:flex;justify-content:space-between;align-items:center;
+  }
+  .errbox .tbar .x{background:#c0c0c0;color:#000;width:16px;height:14px;text-align:center;line-height:14px;border:1px solid #000;font-size:10px}
+  .errbox .body{display:flex;gap:10px;padding:14px 12px;align-items:flex-start}
+  .errbox .ico{
+    width:28px;height:28px;border-radius:50%;background:#c00;color:#fff;
+    font-size:20px;font-weight:bold;text-align:center;line-height:28px;flex-shrink:0;
+    font-family:serif;
+  }
+  .errbox .msg{line-height:1.5}
+  .errbox .btn{
+    margin:4px auto 12px;display:block;background:#c0c0c0;border:2px solid #000;
+    padding:3px 22px;font-size:12px;font-family:inherit;cursor:pointer;
+    box-shadow:inset 1px 1px 0 #fff,inset -1px -1px 0 #808080;
+  }
+
+  /* ===== 蓝屏 BSOD ===== */
+  .bsod{
+    background:#0000aa;color:#fff;
+    font-family:"Courier New",monospace;
+    padding:6% 8%;display:none;flex-direction:column;
+  }
+  .bsod.show{display:flex}
+  .bsod h2{background:#aaa;color:#0000aa;padding:2px 8px;display:inline-block;font-size:18px;margin-bottom:24px;align-self:flex-start}
+  .bsod p{font-size:15px;line-height:1.9;margin:4px 0}
+  .bsod .pct{margin-top:20px;font-size:15px}
+
+  /* ===== 角色卡 ===== */
+  .card-layer{
+    display:none;flex-direction:column;align-items:center;justify-content:center;
+    background:radial-gradient(ellipse at center,#021 0%,#000 75%);
+    padding:24px;overflow:auto;
+  }
+  .card-layer.show{display:flex}
+  .card{
+    width:min(92%,560px);padding:30px 34px;
+    border:1px solid #1a8c3a;background:rgba(0,18,9,0.92);
+    box-shadow:0 0 30px rgba(0,255,100,0.25),inset 0 0 22px rgba(0,255,100,0.06);
+    font-family:"Courier New",monospace;color:#bbffbb;
+    position:relative;
+  }
+  .card::before{
+    content:"CHARACTER PROFILE // 0xADMIN";
+    position:absolute;top:-12px;left:24px;
+    background:#000;padding:0 10px;font-size:11px;letter-spacing:0.25em;color:#1a8c3a;
+  }
+  .card h3{
+    color:#33ff66;font-size:20px;letter-spacing:0.15em;margin-bottom:20px;
+    text-shadow:0 0 10px #00ff66;text-align:center;
+  }
+  .card .row{display:flex;gap:14px;padding:9px 0;border-bottom:1px dashed #0f5c25;font-size:15px;line-height:1.6}
+  .card .row:last-of-type{border-bottom:none}
+  .card .k{color:#1a8c3a;width:84px;flex-shrink:0;letter-spacing:0.1em}
+  .card .v{color:#bbffbb;flex:1;word-break:break-all}
+  /* 可编辑字段：悬停高亮 + 聚焦下划线 */
+  .card .v.editable{cursor:text;border-radius:3px;transition:background 0.15s}
+  .card .v.editable:hover{background:rgba(0,255,100,0.08)}
+  .card .v.editable:focus{outline:none;background:rgba(0,255,100,0.12);box-shadow:0 1px 0 #33ff66}
+  .card .v.editable::after{content:" ✎";color:#0f5c25;font-size:12px;opacity:0.7}
+  .card .v.editable:focus::after{content:""}
+  .card .actions{margin-top:22px;text-align:center}
+  .card .copybtn{
+    background:transparent;color:#33ff66;border:1px solid #33ff66;
+    padding:10px 30px;font-family:inherit;font-size:14px;letter-spacing:0.2em;cursor:pointer;
+    text-shadow:0 0 8px #00ff66;box-shadow:0 0 12px rgba(0,255,100,0.3),inset 0 0 12px rgba(0,255,100,0.1);
+    transition:all 0.2s;
+  }
+  .card .copybtn:hover{background:rgba(0,255,100,0.12);box-shadow:0 0 20px rgba(0,255,100,0.6)}
+  .card .copytip{margin-top:10px;font-size:12px;color:#0f5c25;letter-spacing:0.15em;min-height:16px}
+
+</style>
+</head>
+<body>
+
+<!-- CRT 外壳 -->
+<div class="bezel">
+  <div class="screen">
+    <canvas id="cv"></canvas>
+    <div class="rgb"></div>
+    <div class="scanlines"></div>
+    <div class="vignette"></div>
+    <div class="flicker"></div>
+  </div>
+</div>
+
+<!-- 启动覆盖层 -->
+<div class="overlay" id="overlay">
+  <h1>点击启动</h1>
+  <p>SIGNAL // CRT-1995</p>
+</div>
+
+<!-- 控制台输入层 -->
+<div class="layer console-layer" id="consoleLayer">
+  <div class="console-box">
+    <div class="console-prompt">SYSTEM // 身份验证协议已启动</div>
+    <div class="console-line">
+      <span class="gt">&gt;</span>
+      <input class="console-input" id="nameInput" type="text" autocomplete="off" spellcheck="false" placeholder="请输入你的名字" />
+    </div>
+    <button class="console-submit" id="nameSubmit" type="button">确认</button>
+  </div>
+</div>
+
+<!-- 假错误弹窗层 -->
+<div class="layer err-layer" id="errLayer"></div>
+
+<!-- 蓝屏层 -->
+<div class="layer bsod" id="bsod">
+  <h2>Windows</h2>
+  <p>出现了一个问题，系统已停止运行。</p>
+  <p>如果这是第一次出现此画面，请重启设备。</p>
+  <p>如果再次出现，请按以下步骤操作：</p>
+  <p>检查并确认拥有足够的磁盘空间。如果驱动程序在停止消息中被识别，请禁用该驱动程序或向制造商咨询更新。</p>
+  <p>尝试更换显像适配器。向软件供应商咨询所需的任何 BIOS 更新。禁用 BIOS 内存选项，例如缓存或阴影。</p>
+  <p class="pct">正在收集错误信息：0% 完成</p>
+  <p>停止代码：CRITICAL_PROCESS_DIED</p>
+  <p>失败的操作：sysroot.exe</p>
+</div>
+
+<!-- 角色卡层 -->
+<div class="layer card-layer" id="cardLayer">
+  <div class="card" id="card">
+    <h3>角色档案</h3>
+    <div class="row"><span class="k">姓名</span><span class="v" id="f-name">—</span></div>
+    <div class="row"><span class="k">年龄</span><span class="v editable" id="f-age" contenteditable="true" spellcheck="false">—</span></div>
+    <div class="row"><span class="k">性别</span><span class="v editable" id="f-gender" contenteditable="true" spellcheck="false">—</span></div>
+    <div class="row"><span class="k">外貌</span><span class="v editable" id="f-look" contenteditable="true" spellcheck="false">—</span></div>
+    <div class="row"><span class="k">性格</span><span class="v editable" id="f-personality" contenteditable="true" spellcheck="false">—</span></div>
+    <div class="row"><span class="k">背景设定</span><span class="v editable" id="f-bg" contenteditable="true" spellcheck="false">—</span></div>
+    <div class="actions">
+      <button class="copybtn" id="copyBtn">复制角色卡</button>
+      <div class="copytip" id="copyTip"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ============================================================
+   CRT 显像管解密开场动画
+   阶段：雪花 → 乱码 → 随机消失 → 解码"你是谁"
+        → 控制台输入名字 → 满屏假错误 → 蓝屏
+        → 满屏乱码+"已检测到管理员" → 花屏 → 角色卡
+   ============================================================ */
+
+// ---------- DOM ----------
+const canvas       = document.getElementById('cv');
+const ctx          = canvas.getContext('2d', { alpha:false });
+const overlay      = document.getElementById('overlay');
+const consoleLayer = document.getElementById('consoleLayer');
+const nameInput    = document.getElementById('nameInput');
+const nameSubmit   = document.getElementById('nameSubmit');
+const errLayer     = document.getElementById('errLayer');
+const bsodEl       = document.getElementById('bsod');
+const cardLayer    = document.getElementById('cardLayer');
+const copyBtn      = document.getElementById('copyBtn');
+const copyTip      = document.getElementById('copyTip');
+
+// ---------- 乱码字符集 ----------
+// 中文乱码（GBK 解码错误特征字符）
+const CN = "锟斤拷烫锘锝锳锎锏锠锢锤锥锦锧锨锩锪锫锬锭键锰锱锲锳锴锶锷锸锹锺锻锼锽锾锿";
+// 拉丁字母
+const LAT = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+// 西里尔字母 А-Я а-я
+let CYR = "";
+for (let i = 0x0410; i <= 0x044F; i++) CYR += String.fromCharCode(i);
+const POOL = CN + LAT + CYR;
+function randChar(){ return POOL.charAt((Math.random() * POOL.length) | 0); }
+
+// ---------- 网格参数 ----------
+const FS = 24;          // 字号
+const CW = 26;          // 单元宽
+const CH = 30;          // 单元高
+let W = 0, H = 0;       // CSS 像素宽高
+let DPR = 1;
+let cols = 0, rows = 0;
+let centerRow = 0, startCol = 0;
+const TARGET = "你是谁";
+let targetMap = {};     // 列号 -> 目标字符
+let fadeThreshold = []; // 非目标单元的随机消失阈值（0~1）
+
+// ---------- 雪花离屏画布（半分辨率以提升性能） ----------
+const snow = document.createElement('canvas');
+const sctx = snow.getContext('2d');
+
+// ---------- 音频 ----------
+let audioCtx = null, masterGain = null;
+let noiseSrc = null, noiseGain = null;
+let humOsc = null;
+
+// ---------- 阶段时长（秒） ----------
+const SNOW_DUR    = 3.6;   // 雪花淡出
+const SCRAM_DUR   = 2.0;   // 纯乱码（满屏跳动）
+const FADE_DUR    = 2.0;   // 乱码随机消失阶段（非目标乱码逐渐消失）
+const DECODE_DUR  = 1.8;   // 目标乱码从左到右解码
+const PAUSE_DUR   = 1.0;   // 解码完成停顿
+
+const SCRAM_END   = SNOW_DUR + SCRAM_DUR;   // 满屏乱码结束
+const FADE_END    = SCRAM_END + FADE_DUR;    // 乱码随机消失结束
+const DECODE_END  = FADE_END + DECODE_DUR;   // 目标解码结束
+const INPUT_TIME  = DECODE_END + PAUSE_DUR;  // 进入控制台输入阶段
+
+// ---------- 后续阶段时长（秒，相对各阶段起点） ----------
+const ERR_DUR     = 2.8;   // 假错误弹窗持续
+const BSOD_DUR    = 3.2;   // 蓝屏持续
+const GARBLE_DUR  = 2.6;   // 满屏乱码+管理员文字
+const GLITCH_DUR  = 1.6;   // 花屏持续
+
+// ---------- 运行状态 ----------
+let startTime = 0;
+let prevDecoded = -1;
+let lastClickTs = 0;
+let running = false;
+
+// 阶段状态机：anim → input → errors → bsod → garble → glitch → card
+let phase = 'anim';
+let phaseStart = 0;     // 当前阶段开始时间戳
+let userName = '';      // 用户输入的名字
+
+// ---------- 自适应尺寸 ----------
+function resize(){
+  // 使用 offsetWidth/offsetHeight（忽略 CSS 变换，取布局尺寸）
+  W = Math.max(1, Math.floor(canvas.offsetWidth));
+  H = Math.max(1, Math.floor(canvas.offsetHeight));
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width  = Math.floor(W * DPR);
+  canvas.height = Math.floor(H * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+  cols = Math.floor(W / CW);
+  rows = Math.floor(H / CH);
+  centerRow = Math.floor(rows / 2);
+  startCol  = Math.floor(cols / 2) - Math.floor(TARGET.length / 2);
+  targetMap = {};
+  for (let i = 0; i < TARGET.length; i++) targetMap[startCol + i] = TARGET[i];
+
+  // 每个非目标单元的随机消失阈值（0~1），用于乱码随机消失阶段
+  fadeThreshold = new Array(rows * cols);
+  for (let i = 0; i < fadeThreshold.length; i++) fadeThreshold[i] = Math.random();
+
+  // 雪花画布使用半分辨率
+  snow.width  = Math.max(1, Math.ceil(W / 2));
+  snow.height = Math.max(1, Math.ceil(H / 2));
+}
+window.addEventListener('resize', resize);
+
+// ---------- 音频初始化 ----------
+function initAudio(){
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.resume) audioCtx.resume();
+
+  masterGain = audioCtx.createGain();
+  masterGain.gain.value = 0.5;
+  masterGain.connect(audioCtx.destination);
+
+  // 白噪声生成器（循环）
+  const sr = audioCtx.sampleRate;
+  const buf = audioCtx.createBuffer(1, sr * 2, sr);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  noiseSrc = audioCtx.createBufferSource();
+  noiseSrc.buffer = buf;
+  noiseSrc.loop = true;
+  noiseGain = audioCtx.createGain();
+  noiseGain.gain.value = 0.35;
+  noiseSrc.connect(noiseGain).connect(masterGain);
+  noiseSrc.start();
+
+  // 低频电流嗡鸣
+  humOsc = audioCtx.createOscillator();
+  humOsc.type = 'sine';
+  humOsc.frequency.value = 58;
+  const humGain = audioCtx.createGain();
+  humGain.gain.value = 0.07;
+  humOsc.connect(humGain).connect(masterGain);
+  humOsc.start();
+}
+
+// 解密咔哒声：短促高通噪声脉冲
+function playClick(){
+  if (!audioCtx) return;
+  const sr = audioCtx.sampleRate;
+  const len = Math.floor(sr * 0.04);
+  const buf = audioCtx.createBuffer(1, len, sr);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+  const src = audioCtx.createBufferSource();
+  src.buffer = buf;
+  const filter = audioCtx.createBiquadFilter();
+  filter.type = 'highpass';
+  filter.frequency.value = 1600;
+  const g = audioCtx.createGain();
+  g.gain.value = 0.18;
+  src.connect(filter).connect(g).connect(masterGain);
+  src.start();
+}
+
+// ---------- 雪花渲染 ----------
+function drawSnow(op){
+  const ow = snow.width, oh = snow.height;
+  const img = sctx.createImageData(ow, oh);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4){
+    const v = (Math.random() * 255) | 0;
+    d[i] = v; d[i+1] = v; d[i+2] = v; d[i+3] = 255;
+  }
+  sctx.putImageData(img, 0, 0);
+  ctx.save();
+  ctx.globalAlpha = op;
+  // 半分辨率雪花放大到全屏（带 dpr 缩放）
+  ctx.drawImage(snow, 0, 0, W, H);
+  ctx.restore();
+}
+
+// ---------- 乱码 / 解密网格渲染 ----------
+// fadeProgress: 0~1+ 乱码随机消失进度（仅作用于非目标单元）
+// decodeCount:  已解码的目标字符个数（0~TARGET.length）
+function drawGrid(e, fadeProgress, decodeCount){
+  ctx.font = FS + 'px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.shadowColor = '#33ff66';
+
+  const pulse = 14 + 6 * Math.sin(e * 3); // 目标字符磷光呼吸
+
+  for (let r = 0; r < rows; r++){
+    const y = r * CH;
+    for (let c = 0; c < cols; c++){
+      const x = c * CW + CW / 2;
+      const isTarget = (r === centerRow && targetMap[c]);
+
+      if (isTarget){
+        // 目标位置：判断是否已解码
+        const tIdx = c - startCol;
+        if (tIdx < decodeCount){
+          // 已解码：显示正确字符，发光
+          ctx.shadowBlur = pulse;
+          ctx.fillStyle = '#bbffbb';
+          ctx.fillText(targetMap[c], x, y);
+        } else {
+          // 未解码：跳动乱码
+          ctx.shadowBlur = 4;
+          ctx.fillStyle = '#33ff66';
+          ctx.fillText(randChar(), x, y);
+        }
+      } else {
+        // 非目标位置：按随机阈值消失
+        const threshold = fadeThreshold[r * cols + c];
+        if (fadeProgress < threshold){
+          // 仍在跳动
+          ctx.shadowBlur = 4;
+          ctx.fillStyle = '#33ff66';
+          ctx.fillText(randChar(), x, y);
+        }
+        // 否则已消失，不绘制
+      }
+    }
+  }
+  ctx.shadowBlur = 0;
+}
+
+// ---------- 主渲染循环 ----------
+function frame(ts){
+  if (!startTime) startTime = ts;
+
+  // 清屏
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+
+  if (phase === 'anim'){
+    const e = (ts - startTime) / 1000;
+
+    // 计算乱码消失进度与目标解码个数
+    let fadeProgress = 0;
+    let decodeCount  = 0;
+
+    if (e < SCRAM_END){
+      fadeProgress = 0; decodeCount = 0;
+    } else if (e < FADE_END){
+      fadeProgress = (e - SCRAM_END) / FADE_DUR; decodeCount = 0;
+    } else if (e < DECODE_END){
+      fadeProgress = 1.5;
+      decodeCount = Math.floor((e - FADE_END) / DECODE_DUR * TARGET.length);
+    } else {
+      fadeProgress = 1.5; decodeCount = TARGET.length;
+    }
+
+    drawGrid(e, fadeProgress, decodeCount);
+
+    // 雪花叠加（线性淡出）
+    let snowOp = 1 - e / SNOW_DUR;
+    if (snowOp > 0) drawSnow(snowOp);
+    if (noiseGain) noiseGain.gain.value = 0.35 * Math.max(0, snowOp);
+
+    // 解码咔哒声
+    if (decodeCount > prevDecoded){
+      if (ts - lastClickTs > 60){ playClick(); lastClickTs = ts; }
+      prevDecoded = decodeCount;
+    }
+
+    // 进入控制台输入阶段
+    if (e >= INPUT_TIME){
+      enterPhase('input', ts);
+    }
+  }
+  else if (phase === 'garble'){
+    const e = (ts - phaseStart) / 1000;
+    // 满屏乱码
+    drawFullScramble(e);
+    // 后半段逐字显示"已检测到管理员，进行下一步输出"
+    const ADMIN_LINE = '已检测到管理员，进行下一步输出';
+    const typeStart = GARBLE_DUR * 0.45;
+    if (e > typeStart){
+      const shown = Math.min(ADMIN_LINE.length, Math.floor((e - typeStart) / 0.06));
+      drawAdminLine(ADMIN_LINE.slice(0, shown));
+      if (shown > prevDecoded && ts - lastClickTs > 50){ playClick(); lastClickTs = ts; }
+      prevDecoded = shown;
+    }
+    if (e >= GARBLE_DUR) enterPhase('glitch', ts);
+  }
+  else if (phase === 'glitch'){
+    const e = (ts - phaseStart) / 1000;
+    drawGlitch(e);
+    if (e >= GLITCH_DUR) enterPhase('card', ts);
+  }
+  // input / errors / bsod / card 阶段由 HTML 覆盖层呈现，canvas 留空（黑）
+
+  if (running) requestAnimationFrame(frame);
+}
+
+// ---------- 阶段切换 ----------
+function enterPhase(p, ts){
+  phase = p;
+  phaseStart = ts;
+  prevDecoded = -1;
+
+  if (p === 'input'){
+    // 显示控制台输入框，保持"你是谁"在 canvas 上
+    consoleLayer.classList.add('show');
+    setTimeout(() => nameInput.focus(), 50);
+  }
+  else if (p === 'errors'){
+    consoleLayer.classList.remove('show');
+    startErrorSpam();
+    setTimeout(() => enterPhase('bsod', performance.now()), ERR_DUR * 1000);
+  }
+  else if (p === 'bsod'){
+    errLayer.classList.remove('show');
+    errLayer.innerHTML = '';
+    bsodEl.classList.add('show');
+    setTimeout(() => enterPhase('garble', performance.now()), BSOD_DUR * 1000);
+  }
+  else if (p === 'garble'){
+    bsodEl.classList.remove('show');
+  }
+  else if (p === 'card'){
+    showCard();
+  }
+}
+
+// ---------- 满屏乱码（garble 阶段） ----------
+function drawFullScramble(e){
+  ctx.font = FS + 'px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.shadowColor = '#33ff66';
+  ctx.shadowBlur = 4;
+  ctx.fillStyle = '#33ff66';
+  for (let r = 0; r < rows; r++){
+    const y = r * CH;
+    for (let c = 0; c < cols; c++){
+      ctx.fillText(randChar(), c * CW + CW / 2, y);
+    }
+  }
+  ctx.shadowBlur = 0;
+}
+
+// ---------- 绘制管理员文字行 ----------
+function drawAdminLine(text){
+  ctx.font = 'bold 26px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = '#00ff66';
+  ctx.shadowBlur = 16;
+  ctx.fillStyle = '#bbffbb';
+  // 黑色衬底条增强可读性
+  const tw = ctx.measureText(text).width;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(W / 2 - tw / 2 - 12, H / 2 - 20, tw + 24, 40);
+  ctx.fillStyle = '#bbffbb';
+  ctx.fillText(text, W / 2, H / 2);
+  ctx.shadowBlur = 0;
+}
+
+// ---------- 花屏故障效果 ----------
+function drawGlitch(e){
+  // 随机彩色噪点块
+  const blocks = 40;
+  for (let i = 0; i < blocks; i++){
+    const bw = 40 + Math.random() * 200;
+    const bh = 4 + Math.random() * 60;
+    const bx = Math.random() * W;
+    const by = Math.random() * H;
+    ctx.fillStyle = ['rgba(0,255,100,0.5)','rgba(255,0,80,0.4)','rgba(0,150,255,0.4)','rgba(255,255,0,0.3)'][(Math.random()*4)|0];
+    ctx.fillRect(bx, by, bw, bh);
+  }
+  // 水平撕裂条（位移的乱码带）
+  const tearCount = 3 + ((Math.random()*4)|0);
+  for (let i = 0; i < tearCount; i++){
+    const ty = Math.random() * H;
+    const th = 10 + Math.random() * 40;
+    const dx = (Math.random() - 0.5) * 120;
+    ctx.font = FS + 'px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.shadowColor = '#33ff66';
+    ctx.shadowBlur = 4;
+    ctx.fillStyle = '#33ff66';
+    for (let c = 0; c < cols; c++){
+      ctx.fillText(randChar(), c * CW + CW / 2 + dx, ty);
+    }
+  }
+  ctx.shadowBlur = 0;
+  // RGB 色散扫描线
+  ctx.fillStyle = 'rgba(255,0,0,0.06)';
+  ctx.fillRect(0, (e * 400) % H, W, 2);
+  ctx.fillStyle = 'rgba(0,0,255,0.06)';
+  ctx.fillRect(0, ((e * 400) % H) + 2, W, 2);
+}
+
+// ---------- 假错误弹窗满屏 ----------
+const ERR_MSGS = [
+  '系统资源不足，无法完成请求。',
+  '0x00000000: 内存读取失败',
+  '访问被拒绝：权限不足',
+  'sysroot.exe 已停止工作',
+  '检测到非法身份注入',
+  '致命错误：堆栈溢出',
+  '无法验证用户凭证',
+  '内核数据结构损坏',
+  '该操作需要管理员权限',
+  '注册表键值丢失：HKLM\\SYS',
+  '未知硬件故障 0xDEADBEEF',
+  '连接到主机超时'
+];
+let errTimer = null;
+function startErrorSpam(){
+  errLayer.classList.add('show');
+  errLayer.innerHTML = '';
+  let count = 0;
+  const max = 34;
+  errTimer = setInterval(() => {
+    if (count >= max){ clearInterval(errTimer); return; }
+    spawnErrorBox();
+    count++;
+    playClick();
+  }, 75);
+}
+function spawnErrorBox(){
+  const box = document.createElement('div');
+  box.className = 'errbox';
+  const msg = ERR_MSGS[(Math.random() * ERR_MSGS.length) | 0];
+  const lw = errLayer.clientWidth, lh = errLayer.clientHeight;
+  const w = 220 + Math.random() * 80;
+  const h = 110;
+  box.style.width = w + 'px';
+  box.style.left = (Math.random() * Math.max(1, lw - w)) + 'px';
+  box.style.top  = (Math.random() * Math.max(1, lh - h)) + 'px';
+  box.innerHTML =
+    '<div class="tbar"><span>错误</span><span class="x">X</span></div>' +
+    '<div class="body"><div class="ico">!</div><div class="msg">' + msg + '</div></div>' +
+    '<button class="btn">确定</button>';
+  errLayer.appendChild(box);
+}
+
+// ---------- 角色卡生成 ----------
+const LOOKS = [
+  '黑色短发，深灰色眼瞳，身形修长，左眉有一道细小疤痕',
+  '银白色长发，浅蓝色眼睛，面容冷峻，常着深色风衣',
+  '栗色碎发，琥珀色瞳孔，轮廓柔和，右手腕有一圈电子纹身',
+  '深棕短发戴半框眼镜，目光锐利，体格精干，颈侧有数据接口',
+  '亚麻色长发束起，绿色眼睛，肤色苍白，左耳佩戴通讯芯片'
+];
+const PERSONALITIES = [
+  '冷静理性，寡言少语，决策果断但偶尔偏执',
+  '外热内冷，心思缜密，善于伪装情绪',
+  '沉默孤僻，对规则高度敏感，重承诺',
+  '机敏多变，话少但一针见血，厌恶被束缚',
+  '温和克制，逻辑至上，压力下异常镇定'
+];
+const BACKGROUNDS = [
+  '原为系统安全研究员，在一次数据深渊实验中被卷入底层协议，自此获得越权访问能力，被系统标记为"管理员"。',
+  '曾是地下网络的清道夫，因破解了一段不该存在的代码而被追踪，被迫隐入显像管之间的信号残影中生存。',
+  '出身于被遗忘的服务器集群，自幼与故障代码为伴，能听见数据流的低语，被旧系统识别为合法根用户。',
+  '前架构师，因拒绝执行一次大规模记忆擦除而被除名，如今以幽灵身份游走于进程之间，寻找真相。',
+  '来历不明，唯一记录是一串无法解码的指纹，每当系统崩溃时便会现身，被称为"蓝屏之后的影子"。'
+];
+function pick(arr){ return arr[(Math.random() * arr.length) | 0]; }
+
+let cardData = null;
+// 字段 id -> cardData 键名映射
+const EDIT_FIELDS = [
+  { id: 'f-age', key: 'age' },
+  { id: 'f-gender', key: 'gender' },
+  { id: 'f-look', key: 'look' },
+  { id: 'f-personality', key: 'personality' },
+  { id: 'f-bg', key: 'bg' }
+];
+function showCard(){
+  cardLayer.classList.add('show');
+  const name = userName || '未命名';
+  const age = 22 + ((Math.random() * 20) | 0);
+  const gender = Math.random() < 0.5 ? '男' : '女';
+  const look = pick(LOOKS);
+  const personality = pick(PERSONALITIES);
+  const bg = pick(BACKGROUNDS);
+  cardData = { name, age, gender, look, personality, bg };
+
+  document.getElementById('f-name').textContent = name;
+  document.getElementById('f-age').textContent = age + ' 岁';
+  document.getElementById('f-gender').textContent = gender;
+  document.getElementById('f-look').textContent = look;
+  document.getElementById('f-personality').textContent = personality;
+  document.getElementById('f-bg').textContent = bg;
+
+  // 绑定可编辑字段：失焦时把最新文本同步回 cardData
+  EDIT_FIELDS.forEach(({ id, key }) => {
+    const el = document.getElementById(id);
+    el.addEventListener('blur', () => {
+      cardData[key] = el.textContent.trim();
+    });
+    // 回车失焦提交（避免换行）
+    el.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter'){ ev.preventDefault(); el.blur(); }
+    });
+  });
+}
+
+// ---------- 输入提交 ----------
+function submitName(){
+  userName = nameInput.value.trim() || '匿名用户';
+  enterPhase('errors', performance.now());
+}
+// 主：点击确认按钮提交（适配手机端）
+nameSubmit.addEventListener('click', submitName);
+// 辅：桌面端 Enter 快捷键
+nameInput.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Enter'){ ev.preventDefault(); submitName(); }
+});
+
+// ---------- 复制角色卡 ----------
+copyBtn.addEventListener('click', () => {
+  if (!cardData) return;
+  const text =
+    '【角色档案】\n' +
+    '姓名：' + cardData.name + '\n' +
+    '年龄：' + cardData.age + ' 岁\n' +
+    '性别：' + cardData.gender + '\n' +
+    '外貌：' + cardData.look + '\n' +
+    '性格：' + cardData.personality + '\n' +
+    '背景设定：' + cardData.bg;
+  const done = () => { copyTip.textContent = '已复制到剪贴板'; setTimeout(() => copyTip.textContent = '', 2000); };
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+  } else {
+    fallbackCopy(text, done);
+  }
+});
+function fallbackCopy(text, cb){
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); cb(); } catch(e){ copyTip.textContent = '复制失败，请手动选择'; }
+  document.body.removeChild(ta);
+}
+
+// ---------- 启动入口 ----------
+overlay.addEventListener('click', () => {
+  if (running) return;
+  overlay.classList.add('hide');
+  initAudio();
+  resize();
+  running = true;
+  requestAnimationFrame(frame);
+});
+
+// 初始尺寸
+resize();
+
+</script>
+</body>
+</html>
